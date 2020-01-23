@@ -250,12 +250,32 @@ def write_header(header, array):
         # print()
 
 
+def write_header_avoid_clusters(header, array, positions):
+    """Write header into image, but only in given locations."""
+    needed_header_pixels = needed_pixels(len(header))
+    # print(needed_header_pixels)
+    bits = iter(BitString2(header))
+    # print(f"{needed_header_pixels=}   ---- write_header")
+    for idx in itertools.islice(positions, needed_header_pixels):
+        pixel = DataPixel(array[idx])
+        with contextlib.suppress(StopIteration):
+            pixel.set_color_lsb("red", next(bits))
+            pixel.set_color_lsb("green", next(bits))
+            pixel.set_color_lsb("blue", next(bits))
+        # print(f"{red:02b}{green:02b}{blue:02b}", end="")
+        array[idx] = pixel.value
+        # for val in pixel.value[:3]:
+        #     print(f"{val%4:02b}", end="")
+        # print()
+
+
 def write_to_image2(header, data, img, randomseed, target_name):
     """Write some to an image"""
     array = numpy.array(img)
     write_header(header, array)
     needed_header_pixels = needed_pixels(header)
     needed_message_pixels = needed_pixels(data)
+    print(f"{randomseed=}")
 
     random.seed(randomseed)
     # print(f"{needed_header_pixels=}   ---- write_to_image2")
@@ -279,19 +299,23 @@ def write_to_image2(header, data, img, randomseed, target_name):
 def write_to_image_avoid_clusters(header, data, img, randomseed, target_name):
     """Write some to an image"""
     array = numpy.array(img)
-    write_header(header, array)
     needed_header_pixels = needed_pixels(header)
     needed_message_pixels = needed_pixels(data)
 
     random.seed(randomseed)
+    print(f"{randomseed=}")
     # print(f"{needed_header_pixels=}   ---- write_to_image2")
-    unusables = find_editable_pixels(array)
-    indexes = list(numpy.ndindex(array.shape[:2]))[needed_header_pixels:]
-    indexes = set(indexes)
-    indexes -= set(unusables)
-    indexes = list(sorted(indexes))
+    usables = find_editable_pixels(array)
+    # indexes = list(numpy.ndindex(array.shape[:2]))
+    # indexes = set(indexes)
+    # indexes -= set(unusables)
+    # indexes = list(sorted(indexes))
+    indexes = usables
     print(f"Hash of pixels found: {hash(tuple(indexes))}")
-    target_pixels = random.sample(indexes, needed_message_pixels)
+    # print(f"{indexes[:100]=}")
+    write_header_avoid_clusters(header, array, indexes[:needed_header_pixels])
+    target_pixels = random.sample(indexes[needed_header_pixels:],
+                                  needed_message_pixels)
     bits = iter(BitString2(data))
     for position in target_pixels:
         pixel = DataPixel(array[position])
@@ -364,6 +388,7 @@ def read_stream2(key, cipher, array):  # pylint: disable=too-many-locals
     randnonce = cipher[48:64]
     randcipher = cipher[64:96]
     nonce = cipher[96:112]
+    # lennonce + lencipher + randnonce + randcipher + nonce
     length = decrypt(lencipher, lennonce, key)
     length = int(unpad(length, 32).decode())
     randomseed = decrypt(randcipher, randnonce, key)
@@ -388,24 +413,36 @@ def read_stream3(cipher_rsa, array, avoid_clusters=False):
     """Finds the header in the ciphertext and gives to array."""
     all_pixels = list(numpy.ndindex(array.shape[:2]))
     if avoid_clusters:
-        all_pixels = find_editable_pixels(array)
+        usables = find_editable_pixels(array)
+        # print(f"{len(unusables)=}")
+        # indexes = list(numpy.ndindex(array.shape[:2]))
+        # indexes = set(indexes)
+        # indexes -= set(unusables)
+        # indexes = list(sorted(indexes))
+        # all_pixels = indexes
+        all_pixels = usables
     print(f"Hash of pixels found: {hash(tuple(all_pixels))}")
+    # print(f"{all_pixels[:100]=}")
     # key = cipher_rsa.decrypt(built[:256])
     data = read_bytes_in_image2(array, all_pixels)
     ciphered_key, cipher = data[:256], data[256:]
-    key = key = cipher_rsa.decrypt(ciphered_key)
+    print(f"{hash(ciphered_key)=}")
+    print(f"{len(ciphered_key)=}")
+    key = cipher_rsa.decrypt(ciphered_key)
     lennonce = cipher[:16]
     lencipher = cipher[16:48]
     randnonce = cipher[48:64]
     randcipher = cipher[64:96]
     nonce = cipher[96:112]
+    # lennonce + lencipher + randnonce + randcipher + nonce
     length = decrypt(lencipher, lennonce, key)
     length = int(unpad(length, 32).decode())
     randomseed = decrypt(randcipher, randnonce, key)
     needed_header_pixels = needed_pixels(112 + 256)  # 256: key, 112: field lengths
     needed_message_pixels = needed_pixels(length)
-    indexes = list(numpy.ndindex(array.shape[:2]))[needed_header_pixels:]
+    indexes = list(all_pixels)[needed_header_pixels:]
     random.seed(randomseed)
+    print(f"{randomseed=}")
     indexes = random.sample(indexes, needed_message_pixels)
     ints = []
     for index in indexes:
@@ -456,10 +493,11 @@ def read_bytes_in_image2(array, indexes):
     """main"""
     ints = []
     length = len(indexes)
+    print(f"{len(indexes)=}")
     for counter, position in enumerate(indexes):
         print(f"processing pixel {counter}", end="\r")
-        if counter >= 1000:
-            break
+        # if counter >= 1000:
+        #     break
         pixel = DataPixel(array[position])
         for val in pixel.low_value:
             ints.append(val)
@@ -476,12 +514,9 @@ def read_bytes_in_image2(array, indexes):
 
 def set_lsb(pixel, value):
     """set the LSBs"""
-    pixel[0] = pixel[0] >> 2 << 2
-    pixel[1] = pixel[1] >> 2 << 2
-    pixel[2] = pixel[2] >> 2 << 2
-    pixel[0] += value
-    pixel[1] += value
-    pixel[2] += value
+    pixel[0] = (pixel[0] >> 2 << 2) + value
+    pixel[1] = (pixel[1] >> 2 << 2) + value
+    pixel[2] = (pixel[2] >> 2 << 2) + value
 
 
 def surrounding_pixels(array, coords):
@@ -523,14 +558,16 @@ def mark_cluster_unusable(unusable: set, landlocked_unusable: set,
                 unusable.add(candidate)
                 visited.add(candidate)
                 surroundings = surrounding_pixels(array, candidate)
-                amount_pixels_same_color = 0
+                amount_pixels_same_color = 1  # including self
                 for surrounding_pixel in surroundings:
                     # console_image.draw(array, unusable, surrounding_pixel)
                     if surrounding_pixel in unusable:
+                        amount_pixels_same_color += 1
+                        # technically not same color, but landlocked anyway
                         continue
-                    amount_pixels_same_color += 1
                     # time.sleep(0.5)
                     if DataPixel(array[surrounding_pixel]).low_value == initial_lsb:
+                        amount_pixels_same_color += 1
                         candidates.add(surrounding_pixel)
                         unusable.add(surrounding_pixel)
                 if amount_pixels_same_color == len(surroundings):
@@ -546,6 +583,7 @@ def find_editable_pixels(array):
     landlocked_unusable = set()
     # queue = collections.deque(maxlen=array.shape[0])
     indexes = numpy.ndindex(array.shape[:2])
+    indexes = list(indexes)
     for idx, position in enumerate(indexes):
         print(f"{idx / (array.shape[0] * array.shape[1]) * 100:6.2f}%", end="\r")
         if position in unusable:
@@ -557,6 +595,7 @@ def find_editable_pixels(array):
         # for coord in surroundings:
         #     neighbors.append(DataPixel(array[coord]))
         neighbors = [DataPixel(array[coord]) for coord in surroundings]
+        # center is included in surroundings
         if len({neighbor.low_value for neighbor in neighbors}) == 1:
             mark_cluster_unusable(unusable, landlocked_unusable, position, array)
         # else:
@@ -568,10 +607,15 @@ def find_editable_pixels(array):
     # print(len(unusable))
     print("\nFinished searching editable pixels.")
     border_pixels = unusable - landlocked_unusable
+    print(f"{len(border_pixels)=}")
+    print(f"{len(unusable)=}")
+    print(f"{len(landlocked_unusable)=}")
     # Make pixels next to clusters unusable too
     for position in border_pixels:
-        for position in surrounding_pixels(array, position):
-            unusable.add(position)
+        for surround_position in surrounding_pixels(array, position):
+            unusable.add(surround_position)
+    print(f"{len(list(indexes))=}")
+    print(f"{len(unusable)=}")
     return sorted(set(indexes) - unusable)
     # for position in unusable:
     #     array[position] = [0xff, 0x00, 0xff, 255]

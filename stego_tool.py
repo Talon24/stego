@@ -61,6 +61,7 @@ def encrypt_asymmetric(image_path, public_key_file, data_file, target_name=None)
     key, randomseed = os.urandom(32), os.urandom(32)
     cipher_rsa = PKCS1_OAEP.new(rsakey)
     encrypted_key = cipher_rsa.encrypt(key)
+    print(f"{hash(encrypted_key)=}")
     width, height = img.size
     target_size = (width * height) // 8 * 2 * 3
 
@@ -72,6 +73,7 @@ def encrypt_asymmetric(image_path, public_key_file, data_file, target_name=None)
 
     if target_name is None:
         target_name = f"{image_path.stem}_stego{image_path.suffix}"
+    print(f"{randomseed=}")
     header, ciphertext = build_with_randomseed(data, key, randomseed,
                                                asym_cipher=encrypted_key)
     # write_to_image2(header, ciphertext, img, randomseed, target_name)
@@ -122,7 +124,7 @@ if __name__ == '__main__':
     import time
     start = time.time()
     # encrypt_asymmetric("castle.bmp", "testkey.pub", "jste.py")
-    encrypt_asymmetric("meme.png", "testkey.pub", "jste.py")
+    encrypt_asymmetric("meme.png", "testkey.pub", "jste.txt")
     print(f"Finished in {time.time() - start:2.5}s")
     # import cProfile
     # cProfile.run("encrypt_asymmetric()")
