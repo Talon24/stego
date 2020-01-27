@@ -20,8 +20,8 @@ from Crypto.Util.Padding import unpad
 # from stego_reader import main as reader_main
 
 Rgb = collections.namedtuple("RGB", ["red", "green", "blue"])
-PIXEL_IN_CLUSTER = 2000
-PIXEL_NEXT_TO_CLUSTER = 1000
+RSA_ENCRYPTED_LENGTH = 256  # Bytes
+NONCE_LENGTH = 16  # Bytes
 
 
 class CleartextTooLarge(Exception):
@@ -176,6 +176,23 @@ def needed_pixels(data, lsbs=2):
 # print()
 
 
+def int_to_bytes(int_, padlength=32):
+    """Convert int to string, then to bytes, then pad it."""
+    as_str = str(int_)
+    as_bytes = as_str.encode()
+    padded = pad(as_bytes, padlength)
+    return padded
+
+
+def bytes_to_int(bytes_, padlength=32):
+    """Convert int to string, then to bytes, then pad it."""
+    # print(f"{bytes_=}")
+    unpadded = unpad(bytes_, padlength)
+    as_str = unpadded.decode()
+    int_ = int(as_str)
+    return int_
+
+
 def encrypt(data, key):
     """encrypt"""
     cipher = AES.new(key, AES.MODE_EAX)
@@ -189,6 +206,18 @@ def decrypt(ciphertext, nonce, key):
     cipher = AES.new(key, AES.MODE_EAX, nonce=nonce)
     plaintext = cipher.decrypt(ciphertext)
     return plaintext
+
+
+def random_sample(iterable, *_):
+    """exhaustive version of random.sample without max amount"""
+    copy = iterable.copy()
+    number = len(copy) - 1
+    new = []
+    while number >= 0:
+        selection = random.randint(0, number)
+        new.append(copy.pop(selection))
+        number -= 1
+    return new
 
 
 def keygen(key):
@@ -301,9 +330,10 @@ def write_to_image_avoid_clusters(header, data, img, randomseed, target_name):
     array = numpy.array(img)
     needed_header_pixels = needed_pixels(header)
     needed_message_pixels = needed_pixels(data)
+    print(f"{len(data)=}")
 
     random.seed(randomseed)
-    print(f"{randomseed=}")
+    # print(f"{randomseed=}")
     # print(f"{needed_header_pixels=}   ---- write_to_image2")
     usables = find_editable_pixels(array)
     # indexes = list(numpy.ndindex(array.shape[:2]))
@@ -314,8 +344,9 @@ def write_to_image_avoid_clusters(header, data, img, randomseed, target_name):
     print(f"Hash of pixels found: {hash(tuple(indexes))}")
     # print(f"{indexes[:100]=}")
     write_header_avoid_clusters(header, array, indexes[:needed_header_pixels])
-    target_pixels = random.sample(indexes[needed_header_pixels:],
+    target_pixels = random_sample(indexes[needed_header_pixels:],
                                   needed_message_pixels)
+    print(f"{hash(tuple(target_pixels[:500]))=}")
     bits = iter(BitString2(data))
     for position in target_pixels:
         pixel = DataPixel(array[position])
@@ -363,6 +394,34 @@ def build_with_randomseed(data, key, seed, asym_cipher=None):
     header = lennonce + lencipher + randnonce + randcipher + nonce
     if asym_cipher is not None:
         header = asym_cipher + header
+    return header, ciphertext
+
+
+def build_with_randomseed_short_header(data, key, seed, cipher_rsa=None):
+    """build a stream including a randomseed. returns header and ciphertext.
+
+    This makes the header as short as possible (only randomseed).
+    Asymmetric format:
+    - Header format:
+    - - RSA Randomseed
+    - Ciphertext format:
+    - - RSA Len, RSA aes-key, PLAIN nonce for AES, AES ciphertext
+    """
+    ciphertext, nonce = encrypt(data, key)
+    length = int_to_bytes(len(ciphertext))
+    print(f"{length=}")
+    if cipher_rsa:
+        randcipher = cipher_rsa.encrypt(seed)
+        lencipher = cipher_rsa.encrypt(length)
+        symcipher = cipher_rsa.encrypt(key)
+    else:
+        raise NotImplementedError
+        # randcipher, randnonce = encrypt(seed, key)
+        # randcipher = randcipher + randnonce
+    header = randcipher
+    print(f"{len(ciphertext)=}")
+    ciphertext = lencipher + symcipher + nonce + ciphertext
+    print(f"{len(ciphertext)=}")
     return header, ciphertext
 
 
@@ -455,6 +514,50 @@ def read_stream3(cipher_rsa, array, avoid_clusters=False):
     return data
 
 
+def read_stream4(cipher_rsa, array, avoid_clusters=False):
+    # pylint: disable=too-many-locals
+    """Finds the header in the ciphertext and gives to array."""
+    all_pixels = list(numpy.ndindex(array.shape[:2]))
+    if avoid_clusters:
+        usables = find_editable_pixels(array)
+        all_pixels = usables
+    print(f"Hash of pixels found: {hash(tuple(all_pixels))}")
+    # print(f"{all_pixels[:100]=}")
+    # key = cipher_rsa.decrypt(built[:256])
+
+    # Find the fixed header
+    data = read_bytes_in_image2(array, all_pixels)
+    ciphered_random = data[:RSA_ENCRYPTED_LENGTH]
+    randomseed = cipher_rsa.decrypt(ciphered_random)
+    # print(f"{hash(ciphered_key)=}")
+    # print(f"{len(ciphered_key)=}")
+    needed_header_pixels = needed_pixels(RSA_ENCRYPTED_LENGTH)
+    # print(f"{needed_header_pixels=}")
+    indexes = list(all_pixels)[needed_header_pixels:]
+    random.seed(randomseed)
+    # print(f"{randomseed=}")
+    indexes = random_sample(indexes, 2680)
+    ints = []
+    for index in indexes:
+        for val in DataPixel(array[index]).low_value:
+            ints.append(val)
+    bits = "".join([f"{i:02b}" for i in ints])
+    bytes_ = [int(bits[i:i+8], 2) for i in range(0, len(bits), 8)]
+    encrypted = bytes(bytes_)
+    # RSA Len, RSA aes-key, PLAIN nonce for AES, AES ciphertext
+    length = encrypted[:RSA_ENCRYPTED_LENGTH]
+    aes_key = encrypted[RSA_ENCRYPTED_LENGTH:RSA_ENCRYPTED_LENGTH * 2]
+    nonce = encrypted[RSA_ENCRYPTED_LENGTH * 2:
+                      RSA_ENCRYPTED_LENGTH * 2 + NONCE_LENGTH]
+    length = cipher_rsa.decrypt(length)
+    length = bytes_to_int(length)
+    cipher = encrypted[RSA_ENCRYPTED_LENGTH * 2 + NONCE_LENGTH:
+                       RSA_ENCRYPTED_LENGTH * 2 + NONCE_LENGTH + length]
+    aes_key = cipher_rsa.decrypt(aes_key)
+    data = decrypt(cipher, nonce, aes_key)
+    return data
+
+
 def read_bytes_in_image(filename):
     """main"""
     img = Image.open(filename, "r")
@@ -525,14 +628,23 @@ def surrounding_pixels(array, coords):
     # print(shape[:1])
     new_positions = []
     first, second = coords[0], coords[1]
+    # full neighborhood
     for ypos in range(first - 1, first + 2):
         for xpos in range(second - 1, second + 2):
             # print(xpos, ypos)
             # if xpos == first and ypos == second:
             #     continue
-            if xpos >= shape[0] or ypos >= shape[1] or xpos < 0 or ypos < 0:
+            if ypos >= shape[0] or xpos >= shape[1] or xpos < 0 or ypos < 0:
                 continue
             new_positions.append((ypos, xpos))
+
+    # # direct neighborhood
+    # positions = [(first - 1, second), (first + 1, second), (first, second),
+    #              (first, second - 1), (first, second + 1)]
+    # for xpos, ypos in positions:
+    #     if xpos >= shape[0] or ypos >= shape[1] or xpos < 0 or ypos < 0:
+    #         continue
+    #     new_positions.append((ypos, xpos))
     return new_positions
 
 
@@ -584,13 +696,18 @@ def find_editable_pixels(array):
     # queue = collections.deque(maxlen=array.shape[0])
     indexes = numpy.ndindex(array.shape[:2])
     indexes = list(indexes)
+    last_lsb = None  # quicker comparison
     for idx, position in enumerate(indexes):
-        print(f"{idx / (array.shape[0] * array.shape[1]) * 100:6.2f}%", end="\r")
+        print(f"{(idx + 1) / (array.shape[0] * array.shape[1]) * 100:6.2f}%", end="\r")
         if position in unusable:
             continue
         # import ipdb; ipdb.set_trace()
-        surroundings = surrounding_pixels(array, position)
         current_lsb = DataPixel(array[position]).low_value
+        if last_lsb == current_lsb:
+            last_lsb = current_lsb
+            continue
+        last_lsb = current_lsb
+        surroundings = surrounding_pixels(array, position)
         # neighbors = []
         # for coord in surroundings:
         #     neighbors.append(DataPixel(array[coord]))
@@ -607,24 +724,16 @@ def find_editable_pixels(array):
     # print(len(unusable))
     print("\nFinished searching editable pixels.")
     border_pixels = unusable - landlocked_unusable
-    print(f"{len(border_pixels)=}")
-    print(f"{len(unusable)=}")
-    print(f"{len(landlocked_unusable)=}")
+    # print(f"{len(border_pixels)=}")
+    # print(f"{len(unusable)=}")
+    # print(f"{len(landlocked_unusable)=}")
     # Make pixels next to clusters unusable too
     for position in border_pixels:
         for surround_position in surrounding_pixels(array, position):
             unusable.add(surround_position)
-    print(f"{len(list(indexes))=}")
-    print(f"{len(unusable)=}")
+    # print(f"{len(list(indexes))=}")
+    # print(f"{len(unusable)=}")
     return sorted(set(indexes) - unusable)
-    # for position in unusable:
-    #     array[position] = [0xff, 0x00, 0xff, 255]
-    # image = Image.fromarray(array)
-    # for position in unusable:
-    #     image.putpixel(position, (0xff, 0x00, 0xff))
-    # with open("unusable.png", "wb") as file:
-    #     image.save(file)
-    # others = ((ypos-1, xpos-1), (ypos, xpos-1), (ypos-1, xpos), (ypos-1, xpos+2))
 
 
 def mark(filename):
@@ -643,5 +752,9 @@ def mark(filename):
 
 if __name__ == '__main__':
     # print(len(coords_in_distance((10, 10), 2)))
-    array_ = numpy.array(Image.open("meme.png"))
+    import time
+    array_ = numpy.array(Image.open("castle.bmp"))
+    # array_ = numpy.array(Image.open("meme.png"))
+    start = time.time()
     find_editable_pixels(array_)
+    print(f"Needed time: {time.time() - start}")
