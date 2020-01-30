@@ -22,6 +22,7 @@ from Crypto.Util.Padding import unpad
 Rgb = collections.namedtuple("RGB", ["red", "green", "blue"])
 RSA_ENCRYPTED_LENGTH = 256  # Bytes
 NONCE_LENGTH = 16  # Bytes
+CLUSTER_ITERATION_LIMIT = 1000
 
 
 class CleartextTooLarge(Exception):
@@ -136,7 +137,7 @@ class BitString():
         return group
 
 
-class BitString2():
+class BitString2():  # pylint: disable=too-few-public-methods
     """nonfilling bitstring"""
     def __init__(self, bytestring):
         self.bytes = bytestring
@@ -620,11 +621,11 @@ def set_lsb(pixel, value):
     pixel[2] = (pixel[2] >> 2 << 2) + value
 
 
-def get_lsb(pixel, lsb=2):
+def get_lsb(pixel):
     "More efficient lsb getting"
-    red = pixel[0] % 2 ** lsb
-    green = pixel[1] % 2 ** lsb
-    blue = pixel[2] % 2 ** lsb
+    red = pixel[0] & 3
+    green = pixel[1] & 3
+    blue = pixel[2] & 3
     return red, green, blue
 
 
@@ -652,7 +653,7 @@ def surrounding_pixels(array, coords, mode="direct neighborhood"):
     return new_positions
 
 
-def mark_cluster_unusable(unusable: set, landlocked_unusable: set,
+def mark_cluster_unusable(unusable: numpy.array, landlocked_unusable: numpy.array,
                           position: tuple, array: numpy.array):
     """mark a cluster of a color as unusable"""
     initial_lsb = array[position]
@@ -660,51 +661,63 @@ def mark_cluster_unusable(unusable: set, landlocked_unusable: set,
     candidates = {position}
     # candidates = collections.deque([position])
     # i = 0
-    visited = set()
+    visited = numpy.zeros(unusable.shape)
+    # iteration = 0
     while candidates:
+        # if iteration >= CLUSTER_ITERATION_LIMIT:
+        #     break
+        # iteration += 1
         # print(f"depth: {i}", end="\r")
         # print(candidates)
         # i += 1
         current = candidates.copy()
         candidates = set()
-        current -= visited
+        # current -= visited
+        # current[visited] = False
         for candidate in current:
+            if visited[candidate]:
+                continue
             # if candidate == (100, 400):
             #     import ipdb; ipdb.set_trace()
             # if candidate in unusable:
             #     continue
             if numpy.array_equal(array[candidate], initial_lsb):
-                unusable.add(candidate)
-                visited.add(candidate)
+                unusable[candidate] = True
+                visited[candidate] = True
                 surroundings = surrounding_pixels(array, candidate)
                 amount_pixels_same_color = 0  # including self
                 for surrounding_pixel in surroundings:
                     # console_image.draw(array, unusable, surrounding_pixel)
-                    if surrounding_pixel in unusable:
+                    if unusable[surrounding_pixel]:
                         amount_pixels_same_color += 1
                         # technically not same color, but landlocked anyway
                         continue
+                    if visited[surrounding_pixel]:
+                        print("PANIC PANIC "*10)
                     # time.sleep(0.5)
                     if numpy.array_equal(array[surrounding_pixel], initial_lsb):
                         amount_pixels_same_color += 1
                         candidates.add(surrounding_pixel)
-                        unusable.add(surrounding_pixel)
+                        unusable[surrounding_pixel] = True
                 # if candidate == (400, 100):
                 #     import ipdb; ipdb.set_trace()
                 if amount_pixels_same_color == len(surroundings):
                     # Surrounded totally by same-colored pixels
-                    landlocked_unusable.add(candidate)
+                    landlocked_unusable[candidate] = True
         # candidates = set(surroundings)
     # print()
 
 
-def find_editable_pixels(array):
+def find_editable_pixels(array):  # pylint:disable=too-many-locals
     """mark elements as writable or not"""
     low_array = numpy.empty((*array.shape[:2], 3))
     for position in numpy.ndindex(array.shape[:2]):
+        # This takes a very long time, why?
         low_array[position] = get_lsb(array[position])
-    unusable = set()
-    landlocked_unusable = set()
+        # unusable = set()
+    # landlocked_unusable = set()
+    unusable = numpy.zeros(array.shape[:2], dtype=bool)
+    landlocked_unusable = numpy.zeros(array.shape[:2], dtype=bool)
     # queue = collections.deque(maxlen=array.shape[0])
     indexes = numpy.ndindex(array.shape[:2])
     indexes = list(indexes)
@@ -713,7 +726,7 @@ def find_editable_pixels(array):
     for idx, position in enumerate(indexes):
         if idx % interstep == 0:
             print(f"{(idx + 1) / (pixels) * 100:6.2f}%", end="\r")
-        if position in unusable:
+        if unusable[position]:
             continue
         surroundings = surrounding_pixels(array, position)
         neighbors = [low_array[coord] for coord in surroundings]
@@ -722,16 +735,19 @@ def find_editable_pixels(array):
             mark_cluster_unusable(unusable, landlocked_unusable, position, low_array)
     print("\nFinished searching editable pixels.")
     print((400, 100) in landlocked_unusable)
-    border_pixels = unusable - landlocked_unusable
+    border_pixels = numpy.argwhere(unusable & ~landlocked_unusable)
     # Make pixels next to clusters unusable too
     for position in border_pixels:
         for surround_position in surrounding_pixels(array, position):
-            unusable.add(surround_position)
+            unusable[surround_position] = True
 
-    # # Show landlocked pixels
-    # for landlocked in landlocked_unusable:
-    #     array[landlocked] = [255, 0, 255, 255]
-    # img = Image.fromarray(array)
+    # Show landlocked pixels
+    # temp = array.copy()
+    # # temp[landlocked_unusable] = [255, 0, 255, 255]
+    # temp[landlocked_unusable] = [255, 0, 255]  # bmp
+    # # for landlocked in landlocked_unusable:
+    # #     temp[landlocked] = [255, 0, 255, 255]
+    # img = Image.fromarray(temp)
     # with open("meme_landlocked.png", "wb") as file:
     #     img.save(file)
 
@@ -741,7 +757,17 @@ def find_editable_pixels(array):
     # img = Image.fromarray(array)
     # with open("stego_unusable.png", "wb") as file:
     #     img.save(file)
-    return sorted(set(indexes) - unusable)
+
+    # return sorted(set(indexes) - unusable)
+    temp = array.copy()
+    # temp[unusable] = [255, 0, 255, 255]
+    temp[unusable] = [255, 0, 255]  # bmp
+    # for landlocked in landlocked_unusable:
+    #     temp[landlocked] = [255, 0, 255, 255]
+    img = Image.fromarray(temp)
+    with open("meme_landlocked.png", "wb") as file:
+        img.save(file)
+    return list(numpy.argwhere(numpy.ones(array.shape[:2], dtype=bool) & ~unusable))
 
 
 def mark(filename):
@@ -762,7 +788,7 @@ if __name__ == '__main__':
     # print(len(coords_in_distance((10, 10), 2)))
     import time
     START = time.time()
-    find_editable_pixels(numpy.array(Image.open("meme.png")))
-    # find_editable_pixels(numpy.array(Image.open("castle.bmp")))
+    # find_editable_pixels(numpy.array(Image.open("meme.png")))
+    find_editable_pixels(numpy.array(Image.open("castle.bmp")))
     print(f"Needed time: {time.time() - START}")
     sys.exit()
