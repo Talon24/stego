@@ -595,8 +595,6 @@ def read_bytes_in_image(filename):
 def read_bytes_in_image2(array, indexes):
     """main"""
     ints = []
-    length = len(indexes)
-    print(f"{len(indexes)=}")
     for counter, position in enumerate(indexes):
         print(f"processing pixel {counter}", end="\r")
         # if counter >= 1000:
@@ -622,38 +620,45 @@ def set_lsb(pixel, value):
     pixel[2] = (pixel[2] >> 2 << 2) + value
 
 
-def surrounding_pixels(array, coords):
+def get_lsb(pixel, lsb=2):
+    "More efficient lsb getting"
+    red = pixel[0] % 2 ** lsb
+    green = pixel[1] % 2 ** lsb
+    blue = pixel[2] % 2 ** lsb
+    return red, green, blue
+
+
+def surrounding_pixels(array, coords, mode="direct neighborhood"):
     """Get all the surrounding pixels in an array."""
     shape = array.shape
-    # print(shape[:1])
     new_positions = []
     first, second = coords[0], coords[1]
-    # full neighborhood
-    for ypos in range(first - 1, first + 2):
-        for xpos in range(second - 1, second + 2):
-            # print(xpos, ypos)
-            # if xpos == first and ypos == second:
-            #     continue
-            if ypos >= shape[0] or xpos >= shape[1] or xpos < 0 or ypos < 0:
+    if mode == "full neighborhood":
+        for ypos in range(first - 1, first + 2):
+            for xpos in range(second - 1, second + 2):
+                # print(xpos, ypos)
+                # if xpos == first and ypos == second:
+                #     continue
+                if ypos >= shape[0] or xpos >= shape[1] or xpos < 0 or ypos < 0:
+                    continue
+                new_positions.append((ypos, xpos))
+    elif mode == "direct neighborhood":
+        positions = ((first - 1, second), (first + 1, second), (first, second),
+                     (first, second - 1), (first, second + 1))
+        for xpos, ypos in positions:
+            if xpos >= shape[0] or ypos >= shape[1] or xpos < 0 or ypos < 0:
                 continue
-            new_positions.append((ypos, xpos))
-
-    # # direct neighborhood
-    # positions = [(first - 1, second), (first + 1, second), (first, second),
-    #              (first, second - 1), (first, second + 1)]
-    # for xpos, ypos in positions:
-    #     if xpos >= shape[0] or ypos >= shape[1] or xpos < 0 or ypos < 0:
-    #         continue
-    #     new_positions.append((ypos, xpos))
+            new_positions.append((xpos, ypos))
     return new_positions
 
 
 def mark_cluster_unusable(unusable: set, landlocked_unusable: set,
                           position: tuple, array: numpy.array):
     """mark a cluster of a color as unusable"""
-    initial_lsb = DataPixel(array[position]).low_value
+    initial_lsb = array[position]
 
     candidates = {position}
+    # candidates = collections.deque([position])
     # i = 0
     visited = set()
     while candidates:
@@ -664,13 +669,15 @@ def mark_cluster_unusable(unusable: set, landlocked_unusable: set,
         candidates = set()
         current -= visited
         for candidate in current:
+            # if candidate == (100, 400):
+            #     import ipdb; ipdb.set_trace()
             # if candidate in unusable:
             #     continue
-            if DataPixel(array[candidate]).low_value == initial_lsb:
+            if numpy.array_equal(array[candidate], initial_lsb):
                 unusable.add(candidate)
                 visited.add(candidate)
                 surroundings = surrounding_pixels(array, candidate)
-                amount_pixels_same_color = 1  # including self
+                amount_pixels_same_color = 0  # including self
                 for surrounding_pixel in surroundings:
                     # console_image.draw(array, unusable, surrounding_pixel)
                     if surrounding_pixel in unusable:
@@ -678,10 +685,12 @@ def mark_cluster_unusable(unusable: set, landlocked_unusable: set,
                         # technically not same color, but landlocked anyway
                         continue
                     # time.sleep(0.5)
-                    if DataPixel(array[surrounding_pixel]).low_value == initial_lsb:
+                    if numpy.array_equal(array[surrounding_pixel], initial_lsb):
                         amount_pixels_same_color += 1
                         candidates.add(surrounding_pixel)
                         unusable.add(surrounding_pixel)
+                # if candidate == (400, 100):
+                #     import ipdb; ipdb.set_trace()
                 if amount_pixels_same_color == len(surroundings):
                     # Surrounded totally by same-colored pixels
                     landlocked_unusable.add(candidate)
@@ -691,48 +700,47 @@ def mark_cluster_unusable(unusable: set, landlocked_unusable: set,
 
 def find_editable_pixels(array):
     """mark elements as writable or not"""
+    low_array = numpy.empty((*array.shape[:2], 3))
+    for position in numpy.ndindex(array.shape[:2]):
+        low_array[position] = get_lsb(array[position])
     unusable = set()
     landlocked_unusable = set()
     # queue = collections.deque(maxlen=array.shape[0])
     indexes = numpy.ndindex(array.shape[:2])
     indexes = list(indexes)
-    last_lsb = None  # quicker comparison
+    pixels = array.shape[0] * array.shape[1]
+    interstep = pixels // 1000
     for idx, position in enumerate(indexes):
-        print(f"{(idx + 1) / (array.shape[0] * array.shape[1]) * 100:6.2f}%", end="\r")
+        if idx % interstep == 0:
+            print(f"{(idx + 1) / (pixels) * 100:6.2f}%", end="\r")
         if position in unusable:
             continue
-        # import ipdb; ipdb.set_trace()
-        current_lsb = DataPixel(array[position]).low_value
-        if last_lsb == current_lsb:
-            last_lsb = current_lsb
-            continue
-        last_lsb = current_lsb
         surroundings = surrounding_pixels(array, position)
-        # neighbors = []
-        # for coord in surroundings:
-        #     neighbors.append(DataPixel(array[coord]))
-        neighbors = [DataPixel(array[coord]) for coord in surroundings]
+        neighbors = [low_array[coord] for coord in surroundings]
         # center is included in surroundings
-        if len({neighbor.low_value for neighbor in neighbors}) == 1:
-            mark_cluster_unusable(unusable, landlocked_unusable, position, array)
-        # else:
-            # import ipdb; ipdb.set_trace()
-            # unusable.add(position)
-            # for coord in surroundings:
-            #     if DataPixel(array[coord]).low_value == current_lsb:
-            #         unusable.add(coord)
-    # print(len(unusable))
+        if len({tuple(list(neighbor)) for neighbor in neighbors}) == 1:
+            mark_cluster_unusable(unusable, landlocked_unusable, position, low_array)
     print("\nFinished searching editable pixels.")
+    print((400, 100) in landlocked_unusable)
     border_pixels = unusable - landlocked_unusable
-    # print(f"{len(border_pixels)=}")
-    # print(f"{len(unusable)=}")
-    # print(f"{len(landlocked_unusable)=}")
     # Make pixels next to clusters unusable too
     for position in border_pixels:
         for surround_position in surrounding_pixels(array, position):
             unusable.add(surround_position)
-    # print(f"{len(list(indexes))=}")
-    # print(f"{len(unusable)=}")
+
+    # # Show landlocked pixels
+    # for landlocked in landlocked_unusable:
+    #     array[landlocked] = [255, 0, 255, 255]
+    # img = Image.fromarray(array)
+    # with open("meme_landlocked.png", "wb") as file:
+    #     img.save(file)
+
+    # # Show unusable
+    # for unusable in unusable:
+    #     array[unusable] = [255, 0, 255, 255]
+    # img = Image.fromarray(array)
+    # with open("stego_unusable.png", "wb") as file:
+    #     img.save(file)
     return sorted(set(indexes) - unusable)
 
 
@@ -753,8 +761,8 @@ def mark(filename):
 if __name__ == '__main__':
     # print(len(coords_in_distance((10, 10), 2)))
     import time
-    array_ = numpy.array(Image.open("castle.bmp"))
-    # array_ = numpy.array(Image.open("meme.png"))
-    start = time.time()
-    find_editable_pixels(array_)
-    print(f"Needed time: {time.time() - start}")
+    START = time.time()
+    find_editable_pixels(numpy.array(Image.open("meme.png")))
+    # find_editable_pixels(numpy.array(Image.open("castle.bmp")))
+    print(f"Needed time: {time.time() - START}")
+    sys.exit()
