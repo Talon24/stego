@@ -728,9 +728,9 @@ def find_editable_pixels(array):  # pylint:disable=too-many-locals
     # for position in numpy.ndindex(array.shape[:2]):
     #     # This takes a very long time, why?
     #     low_array[position] = get_lsb_single(array[position])
-
+    without_transparency = array[..., :3]
     ufunc = numpy.frompyfunc(binary_lsb, 2, 1)
-    low_array = ufunc.reduce(array, -1, initial=0)
+    low_array = ufunc.reduce(without_transparency, -1, initial=0)
     unusable = numpy.zeros(array.shape[:2], dtype=bool)
     landlocked_unusable = numpy.zeros(array.shape[:2], dtype=bool)
     # queue = collections.deque(maxlen=array.shape[0])
@@ -773,7 +773,7 @@ def find_editable_pixels(array):  # pylint:disable=too-many-locals
     #     img.save(file)
 
     # return sorted(set(indexes) - unusable)
-    temp = array.copy()
+    temp = array.copy()[..., :3]
     # temp[unusable] = [255, 0, 255, 255]
     temp[unusable] = [255, 0, 255]  # bmp
     # for landlocked in landlocked_unusable:
@@ -781,7 +781,7 @@ def find_editable_pixels(array):  # pylint:disable=too-many-locals
     img = Image.fromarray(temp)
     with open("meme_landlocked.png", "wb") as file:
         img.save(file)
-    return list(numpy.argwhere(numpy.ones(array.shape[:2], dtype=bool) & ~unusable))
+    return list(numpy.argwhere(numpy.full(array.shape[:2], True) & ~unusable))
 
 
 def mark(filename):
@@ -802,7 +802,7 @@ if __name__ == '__main__':
     # print(len(coords_in_distance((10, 10), 2)))
     import time
     START = time.time()
-    # find_editable_pixels(numpy.array(Image.open("meme.png")))
-    find_editable_pixels(numpy.array(Image.open("castle.bmp")))
+    find_editable_pixels(numpy.array(Image.open("meme.png")))
+    # find_editable_pixels(numpy.array(Image.open("castle.bmp")))
     print(f"Needed time: {time.time() - START}")
     sys.exit()
