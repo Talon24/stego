@@ -749,7 +749,6 @@ def find_editable_pixels(array):  # pylint:disable=too-many-locals
         if len(set(neighbors)) == 1:
             mark_cluster_unusable(unusable, landlocked_unusable, position, low_array)
     print("\nFinished searching editable pixels.")
-    print((400, 100) in landlocked_unusable)
     border_pixels = numpy.argwhere(unusable & ~landlocked_unusable)
     # Make pixels next to clusters unusable too
     for position in border_pixels:
