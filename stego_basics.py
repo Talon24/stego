@@ -640,7 +640,7 @@ def get_lsb_single(pixel):
 def binary_lsb(reduced_lsb, new_color):
     "More efficient lsb getting"
     second_lsb = new_color & 3
-    return ((reduced_lsb * 4) + second_lsb)
+    return (reduced_lsb * 4) + second_lsb
 
 
 def surrounding_pixels(array, coords, mode="direct neighborhood"):
@@ -695,7 +695,7 @@ def mark_cluster_unusable(unusable: numpy.array, landlocked_unusable: numpy.arra
             #     import ipdb; ipdb.set_trace()
             # if candidate in unusable:
             #     continue
-            if (array[candidate] == initial_lsb):
+            if array[candidate] == initial_lsb:
                 unusable[candidate] = True
                 visited[candidate] = True
                 surroundings = surrounding_pixels(array, candidate)
@@ -709,7 +709,7 @@ def mark_cluster_unusable(unusable: numpy.array, landlocked_unusable: numpy.arra
                     if visited[surrounding_pixel]:
                         print("PANIC PANIC "*10)
                     # time.sleep(0.5)
-                    if (array[surrounding_pixel] == initial_lsb):
+                    if array[surrounding_pixel] == initial_lsb:
                         amount_pixels_same_color += 1
                         candidates.add(surrounding_pixel)
                         unusable[surrounding_pixel] = True
@@ -731,8 +731,6 @@ def find_editable_pixels(array):  # pylint:disable=too-many-locals
 
     ufunc = numpy.frompyfunc(binary_lsb, 2, 1)
     low_array = ufunc.reduce(array, -1, initial=0)
-        # unusable = set()
-    # landlocked_unusable = set()
     unusable = numpy.zeros(array.shape[:2], dtype=bool)
     landlocked_unusable = numpy.zeros(array.shape[:2], dtype=bool)
     # queue = collections.deque(maxlen=array.shape[0])
@@ -748,7 +746,7 @@ def find_editable_pixels(array):  # pylint:disable=too-many-locals
         surroundings = surrounding_pixels(array, position)
         neighbors = [low_array[coord] for coord in surroundings]
         # center is included in surroundings
-        if len({neighbor for neighbor in neighbors}) == 1:
+        if len(set(neighbors)) == 1:
             mark_cluster_unusable(unusable, landlocked_unusable, position, low_array)
     print("\nFinished searching editable pixels.")
     print((400, 100) in landlocked_unusable)
