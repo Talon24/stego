@@ -629,6 +629,20 @@ def get_lsb(pixel):
     return red, green, blue
 
 
+def get_lsb_single(pixel):
+    "More efficient lsb getting"
+    red = pixel[0] & 3
+    green = pixel[1] & 3
+    blue = pixel[2] & 3
+    return ((red * 4) + green) * 4 + blue
+
+
+def binary_lsb(reduced_lsb, new_color):
+    "More efficient lsb getting"
+    second_lsb = new_color & 3
+    return ((reduced_lsb * 4) + second_lsb)
+
+
 def surrounding_pixels(array, coords, mode="direct neighborhood"):
     """Get all the surrounding pixels in an array."""
     shape = array.shape
@@ -681,7 +695,7 @@ def mark_cluster_unusable(unusable: numpy.array, landlocked_unusable: numpy.arra
             #     import ipdb; ipdb.set_trace()
             # if candidate in unusable:
             #     continue
-            if numpy.array_equal(array[candidate], initial_lsb):
+            if (array[candidate] == initial_lsb):
                 unusable[candidate] = True
                 visited[candidate] = True
                 surroundings = surrounding_pixels(array, candidate)
@@ -695,7 +709,7 @@ def mark_cluster_unusable(unusable: numpy.array, landlocked_unusable: numpy.arra
                     if visited[surrounding_pixel]:
                         print("PANIC PANIC "*10)
                     # time.sleep(0.5)
-                    if numpy.array_equal(array[surrounding_pixel], initial_lsb):
+                    if (array[surrounding_pixel] == initial_lsb):
                         amount_pixels_same_color += 1
                         candidates.add(surrounding_pixel)
                         unusable[surrounding_pixel] = True
@@ -710,10 +724,13 @@ def mark_cluster_unusable(unusable: numpy.array, landlocked_unusable: numpy.arra
 
 def find_editable_pixels(array):  # pylint:disable=too-many-locals
     """mark elements as writable or not"""
-    low_array = numpy.empty((*array.shape[:2], 3))
-    for position in numpy.ndindex(array.shape[:2]):
-        # This takes a very long time, why?
-        low_array[position] = get_lsb(array[position])
+    # low_array = numpy.empty((array.shape[:2]))
+    # for position in numpy.ndindex(array.shape[:2]):
+    #     # This takes a very long time, why?
+    #     low_array[position] = get_lsb_single(array[position])
+
+    ufunc = numpy.frompyfunc(binary_lsb, 2, 1)
+    low_array = ufunc.reduce(array, -1, initial=0)
         # unusable = set()
     # landlocked_unusable = set()
     unusable = numpy.zeros(array.shape[:2], dtype=bool)
@@ -731,7 +748,7 @@ def find_editable_pixels(array):  # pylint:disable=too-many-locals
         surroundings = surrounding_pixels(array, position)
         neighbors = [low_array[coord] for coord in surroundings]
         # center is included in surroundings
-        if len({tuple(list(neighbor)) for neighbor in neighbors}) == 1:
+        if len({neighbor for neighbor in neighbors}) == 1:
             mark_cluster_unusable(unusable, landlocked_unusable, position, low_array)
     print("\nFinished searching editable pixels.")
     print((400, 100) in landlocked_unusable)
