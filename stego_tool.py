@@ -30,7 +30,7 @@ from stego_basics import write_to_image_avoid_clusters
 # from stego_basics import
 
 
-def encrypt_symmetric(source, target, payload, password):
+def encrypt_symmetric(source, target, data_file, password):
     """main"""
     img = Image.open(source)
     key = keygen(password)
@@ -41,7 +41,7 @@ def encrypt_symmetric(source, target, payload, password):
     width, height = img.size
     target_size = (width * height) // 8 * 2 * 3
 
-    with open("jste.py", "rb") as file:
+    with open(data_file, "rb") as file:
         data = file.read()
     if len(data) > target_size:
         print("File too large!")
@@ -120,10 +120,10 @@ if __name__ == '__main__':
     # mark("Nut.png")
     import time
     start = time.time()
-    # encrypt_asymmetric("castle.bmp", "testkey.pub", "jste.py")
-    # encrypt_asymmetric("meme_copy.png", "testkey.pub", "jste.txt", avoid_clusters=False)
+    # encrypt_symmetric("meme.png", "meme_symmetric.png", "truncated_bee_movie.txt", "password")
+    # print(decrypt_symmetric("meme_symmetric.png", "password"))
     encrypt_asymmetric("meme.png", "testkey.pub", "truncated_bee_movie.txt", avoid_clusters=True)
-    decrypt_asymmetric("meme_stego.png", "testkey", "password", avoid_clusters=True)
+    print(decrypt_asymmetric("meme_stego.png", "testkey", "password", avoid_clusters=True))
     print(f"Finished in {time.time() - start:2.5}s")
     # import cProfile
     # cProfile.run("encrypt_asymmetric()")
