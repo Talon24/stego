@@ -53,7 +53,8 @@ def encrypt_symmetric(source, target, payload, password):
     write_to_image(built, img, target_name)
 
 
-def encrypt_asymmetric(image_path, public_key_file, data_file, target_name=None):
+def encrypt_asymmetric(image_path, public_key_file, data_file,
+                       target_name=None, avoid_clusters=True):
     """Hide data into an image using a public key."""
     image_path = pathlib.Path(image_path)
     img = Image.open(image_path)
@@ -81,7 +82,11 @@ def encrypt_asymmetric(image_path, public_key_file, data_file, target_name=None)
     header, ciphertext = build_with_randomseed_short_header(
         data, key, randomseed, cipher_rsa)
     # write_to_image2(header, ciphertext, img, randomseed, target_name)
-    write_to_image_avoid_clusters(header, ciphertext, img, randomseed, target_name)
+    if avoid_clusters:
+        write_to_image_avoid_clusters(header, ciphertext, img,
+                                      randomseed, target_name)
+    else:
+        write_to_image2(header, ciphertext, img, randomseed, target_name)
 
     # built = encrypted_key + build_stream(data, key, target_size - 256)
     # write_to_image(built, img, target_name)
@@ -96,7 +101,7 @@ def encrypt_asymmetric(image_path, public_key_file, data_file, target_name=None)
     # print(decrypt_asymmetric(target_name, "testkey", "password"))
     print("---------------------- Begin decryption")
     print(decrypt_asymmetric(target_name, "testkey", "password",
-                             avoid_clusters=True))
+                             avoid_clusters=avoid_clusters))
     # decrypt_asymmetric(target_name, "testkey", "password")
 
 
@@ -130,7 +135,7 @@ if __name__ == '__main__':
     import time
     start = time.time()
     # encrypt_asymmetric("castle.bmp", "testkey.pub", "jste.py")
-    encrypt_asymmetric("meme.png", "testkey.pub", "jste.txt")
+    encrypt_asymmetric("meme_copy.png", "testkey.pub", "jste.txt", avoid_clusters=True)
     print(f"Finished in {time.time() - start:2.5}s")
     # import cProfile
     # cProfile.run("encrypt_asymmetric()")
