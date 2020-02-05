@@ -12,14 +12,14 @@ from PIL import Image
 from Crypto.Cipher import PKCS1_OAEP
 from Crypto.PublicKey import RSA
 
-from stego_basics import build_with_randomseed
+# from stego_basics import build_with_randomseed
 from stego_basics import build_with_randomseed_short_header
 from stego_basics import read_bytes_in_image
 from stego_basics import keygen
 from stego_basics import CleartextTooLarge
 from stego_basics import build_stream
-from stego_basics import read_stream2
-from stego_basics import read_stream3
+# from stego_basics import read_stream2
+# from stego_basics import read_stream3
 from stego_basics import read_stream4
 from stego_basics import write_to_image2
 
@@ -63,7 +63,7 @@ def encrypt_asymmetric(image_path, public_key_file, data_file,
     rsakey = RSA.import_key(public_key, passphrase=None)
     key, randomseed = os.urandom(32), os.urandom(32)
     cipher_rsa = PKCS1_OAEP.new(rsakey)
-    encrypted_key = cipher_rsa.encrypt(key)
+    # encrypted_key = cipher_rsa.encrypt(key)
     # print(f"{hash(encrypted_key)=}")
     width, height = img.size
     target_size = (width * height) // 8 * 2 * 3
@@ -76,33 +76,19 @@ def encrypt_asymmetric(image_path, public_key_file, data_file,
 
     if target_name is None:
         target_name = f"{image_path.stem}_stego{image_path.suffix}"
-    # print(f"{randomseed=}")
-    # header, ciphertext = build_with_randomseed(data, key, randomseed,
-    #                                            asym_cipher=encrypted_key)
     header, ciphertext = build_with_randomseed_short_header(
         data, key, randomseed, cipher_rsa)
-    # write_to_image2(header, ciphertext, img, randomseed, target_name)
     if avoid_clusters:
         write_to_image_avoid_clusters(header, ciphertext, img,
                                       randomseed, target_name)
     else:
         write_to_image2(header, ciphertext, img, randomseed, target_name)
 
-    # built = encrypted_key + build_stream(data, key, target_size - 256)
-    # write_to_image(built, img, target_name)
-
     # TESTING
     # Decrypt
-    # with open("testkey") as file:
-    #     private_key = RSA.import_key(file.read(), passphrase="password")
-    # cipher_rsa = PKCS1_OAEP.new(private_key)
-    # key = cipher_rsa.decrypt(built[:256])
-    # read_stream(key, built[256:])
-    # print(decrypt_asymmetric(target_name, "testkey", "password"))
-    print("---------------------- Begin decryption")
-    print(decrypt_asymmetric(target_name, "testkey", "password",
-                             avoid_clusters=avoid_clusters))
-    # decrypt_asymmetric(target_name, "testkey", "password")
+    # print("---------------------- Begin decryption")
+    # print(decrypt_asymmetric(target_name, "testkey", "password",
+    #                          avoid_clusters=avoid_clusters))
 
 
 def decrypt_symmetric(filename, password):
@@ -113,7 +99,7 @@ def decrypt_symmetric(filename, password):
 
 
 def decrypt_asymmetric(filename, keyfile, password=None, *,
-                       interact=False, avoid_clusters=False):
+                       interact=False, avoid_clusters=True):
     """read asymmetrically encrypted data in stego image."""
     if interact:
         password = getpass.getpass()
@@ -135,7 +121,9 @@ if __name__ == '__main__':
     import time
     start = time.time()
     # encrypt_asymmetric("castle.bmp", "testkey.pub", "jste.py")
-    encrypt_asymmetric("meme_copy.png", "testkey.pub", "jste.txt", avoid_clusters=True)
+    # encrypt_asymmetric("meme_copy.png", "testkey.pub", "jste.txt", avoid_clusters=False)
+    encrypt_asymmetric("meme.png", "testkey.pub", "truncated_bee_movie.txt", avoid_clusters=True)
+    decrypt_asymmetric("meme_stego.png", "testkey", "password", avoid_clusters=True)
     print(f"Finished in {time.time() - start:2.5}s")
     # import cProfile
     # cProfile.run("encrypt_asymmetric()")

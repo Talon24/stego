@@ -310,7 +310,7 @@ def write_to_image2(header, data, img, randomseed, target_name):
     random.seed(randomseed)
     # print(f"{needed_header_pixels=}   ---- write_to_image2")
     indexes = list(numpy.ndindex(array.shape[:2]))[needed_header_pixels:]
-    target_pixels = random.sample(indexes, needed_message_pixels)
+    target_pixels = random_sample(indexes, needed_message_pixels)
     bits = iter(BitString2(data))
     for position in target_pixels:
         pixel = DataPixel(array[position])
@@ -342,6 +342,10 @@ def write_to_image_avoid_clusters(header, data, img, randomseed, target_name):
     # indexes -= set(unusables)
     # indexes = list(sorted(indexes))
     indexes = usables
+    if len(usables) < needed_header_pixels + needed_message_pixels:
+        raise CleartextTooLarge("Needed pixels: {} - available: {}".format(
+            needed_header_pixels + needed_message_pixels, len(usables)
+        ))
     print(f"Hash of pixels found: {hash(tuple(indexes))}")
     # print(f"{indexes[:100]=}")
     write_header_avoid_clusters(header, array, indexes[:needed_header_pixels])
@@ -420,9 +424,8 @@ def build_with_randomseed_short_header(data, key, seed, cipher_rsa=None):
         # randcipher, randnonce = encrypt(seed, key)
         # randcipher = randcipher + randnonce
     header = randcipher
-    print(f"{len(ciphertext)=}")
     ciphertext = lencipher + symcipher + nonce + ciphertext
-    print(f"{len(ciphertext)=}")
+    print(f"{lencipher=}")
     return header, ciphertext
 
 
@@ -520,6 +523,7 @@ def read_stream4(cipher_rsa, array, avoid_clusters=False):
     """Finds the header in the ciphertext and gives to array."""
     all_pixels = list(numpy.ndindex(array.shape[:2]))
     if avoid_clusters:
+        print("CLUSTERS AVOIDED")
         usables = find_editable_pixels(array)
         all_pixels = usables
     print(f"Hash of pixels found: {hash(tuple(all_pixels))}")
@@ -536,8 +540,8 @@ def read_stream4(cipher_rsa, array, avoid_clusters=False):
     # print(f"{needed_header_pixels=}")
     indexes = list(all_pixels)[needed_header_pixels:]
     random.seed(randomseed)
-    # print(f"{randomseed=}")
-    indexes = random_sample(indexes, 2680)
+    print(f"{randomseed=}")
+    indexes = random_sample(indexes)  # 2680: first test file
     ints = []
     for index in indexes:
         for val in DataPixel(array[index]).low_value:
@@ -596,8 +600,10 @@ def read_bytes_in_image(filename):
 def read_bytes_in_image2(array, indexes):
     """main"""
     ints = []
+    interstep = 1000
     for counter, position in enumerate(indexes):
-        print(f"processing pixel {counter}", end="\r")
+        if counter % interstep == 0:
+            print(f"processing pixel {counter}", end="\r")
         # if counter >= 1000:
         #     break
         pixel = DataPixel(array[position])
@@ -774,14 +780,12 @@ def find_editable_pixels(array):  # pylint:disable=too-many-locals
 
     # return sorted(set(indexes) - unusable)
     temp = array.copy()[..., :3]
-    # temp[unusable] = [255, 0, 255, 255]
-    temp[unusable] = [255, 0, 255]  # bmp
-    # for landlocked in landlocked_unusable:
-    #     temp[landlocked] = [255, 0, 255, 255]
+    temp[unusable] = [255, 0, 255]
     img = Image.fromarray(temp)
     with open("meme_landlocked.png", "wb") as file:
         img.save(file)
-    return list(numpy.argwhere(numpy.full(array.shape[:2], True) & ~unusable))
+    # import ipdb; ipdb.set_trace()
+    return list(tuple(i) for i in numpy.argwhere(numpy.full(array.shape[:2], True) & ~unusable))
 
 
 def mark(filename):
